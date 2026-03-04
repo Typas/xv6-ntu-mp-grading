@@ -110,10 +110,10 @@ if [[ -n "$OUTPUT_FILE" && "$DRY_RUN" == false ]]; then
     mkdir -p "${OUTPUT_FILE%/*}" || echo "  ⚠️ Warning: Failed to create directory ${OUTPUT_FILE%/*}"
     echo "Syncing all repositories containing keyword [$REPO_KEYWORD] and present in whitelist from GitHub API..."
     
-    gh api "user/repos?affiliation=collaborator&per_page=100" --paginate | jq -r \
+    gh api "user/repos?affiliation=collaborator&per_page=100" --paginate | jq -r -s \
       --argjson list "$USER_LIST_JSON" \
       --arg kw "$REPO_KEYWORD" \
-      '[.[] | select((.owner.login as $u | $list | index($u) != null) and (.name | contains($kw))) | .full_name]' \
+      'add | [.[] | select((.owner.login as $u | $list | index($u) != null) and (.name | contains($kw))) | .full_name]' \
       > "$OUTPUT_FILE"
       
     if [[ $? -eq 0 ]]; then
