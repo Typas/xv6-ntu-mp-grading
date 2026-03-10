@@ -3,24 +3,28 @@
 # --- Default values ---
 WHITELIST_FILE=""
 REPO_KEYWORD=""
+DEADLINE=""
+DEADLINE_TS=0
 DRY_RUN=false
 
 # --- Usage ---
 usage() {
-    echo "Usage: $0 -f <whitelist_file> -r <repo_keyword> [-o <output_file>] [-d]"
+    echo "Usage: $0 -f <whitelist_file> -r <repo_keyword> [-t <deadline>] [-o <output_file>] [-d]"
     echo "Parameters:"
     echo "  -f    Specify the file containing inviter accounts (one name per line)"
     echo "  -r    Specify the required keyword in the repository name"
+    echo "  -t    [Optional] Specify a deadline (e.g. \"2026-03-10 23:59:59 +0800\"). Invitations sent after this time will be ignored."
     echo "  -o    [Optional] Output successfully accepted Repos to a JSON file (e.g., students.json)"
     echo "  -d    Enable Dry-run mode (preview only, no actual execution)"
     exit 1
 }
 
 # --- Parse arguments ---
-while getopts "f:r:o:d" opt; do
+while getopts "f:r:t:o:d" opt; do
     case "$opt" in
         f) WHITELIST_FILE=$OPTARG ;;
         r) REPO_KEYWORD=$OPTARG ;;
+        t) DEADLINE=$OPTARG ;;
         o) OUTPUT_FILE=$OPTARG ;;
         d) DRY_RUN=true ;;
         *) usage ;;
@@ -35,6 +39,15 @@ fi
 if [[ ! -f "$WHITELIST_FILE" ]]; then
     echo "Error: File not found $WHITELIST_FILE"
     exit 1
+fi
+
+if [[ -n "$DEADLINE" ]]; then
+    DEADLINE_TS=$(date -d "$DEADLINE" +%s 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        echo "Error: Invalid deadline format. Please use formats like \"2026-03-10 23:59:59\" or \"2026-03-10 23:59:59 +0800\"."
+        exit 1
+    fi
+    echo "Deadline set to: $DEADLINE (UNIX Timestamp: $DEADLINE_TS)"
 fi
 
 # --- Read whitelist and convert to JSON array ---
@@ -52,19 +65,45 @@ echo "Phase 1: Accept Invitations"
 echo "Starting filtering task..."
 echo "Whitelist file: $WHITELIST_FILE"
 echo "Repo keyword: $REPO_KEYWORD"
+[[ -n "$DEADLINE" ]] && echo "Deadline Threshold: $DEADLINE"
 [[ "$DRY_RUN" == true ]] && echo "Mode: [DRY-RUN]" || echo "Mode: [EXECUTION]"
 echo "--------------------------------------------------"
 
 # --- Key fix: call gh api first, then pipe to jq ---
 # Filter for matching repos and split into private/public lists
 ALL_INVITATIONS=$(gh api user/repository_invitations --paginate)
-INVITATIONS=$(echo "$ALL_INVITATIONS" | jq -c --argjson list "$USER_LIST_JSON" --arg kw "$REPO_KEYWORD" '
+
+# Valid Private Invitations
+INVITATIONS=$(echo "$ALL_INVITATIONS" | jq -c --argjson list "$USER_LIST_JSON" --arg kw "$REPO_KEYWORD" --argjson deadline_ts "$DEADLINE_TS" '
   .[] | select(
     (.inviter.login as $u | $list | index($u) != null) and
     (.repository.name | contains($kw)) and
-    (.repository.private == true)
+    (.repository.private == true) and
+    (if $deadline_ts > 0 then (.created_at | fromdateiso8601) <= $deadline_ts else true end)
   ) | {id: .id, repo: .repository.full_name, inviter: .inviter.login}
 ')
+
+# Late Private Invitations
+LATE_INVITATIONS=$(echo "$ALL_INVITATIONS" | jq -c --argjson list "$USER_LIST_JSON" --arg kw "$REPO_KEYWORD" --argjson deadline_ts "$DEADLINE_TS" '
+  .[] | select(
+    (.inviter.login as $u | $list | index($u) != null) and
+    (.repository.name | contains($kw)) and
+    (.repository.private == true) and
+    (if $deadline_ts > 0 then (.created_at | fromdateiso8601) > $deadline_ts else false end)
+  ) | {id: .id, repo: .repository.full_name, inviter: .inviter.login, created_at: .created_at}
+')
+
+if [[ -n "$LATE_INVITATIONS" ]]; then
+    echo "  ⏰ LATE INVITATIONS DETECTED (Sent after the deadline):"
+    echo "$LATE_INVITATIONS" | while read -r l_item; do
+        L_REPO=$(echo "$l_item" | jq -r '.repo')
+        L_USER=$(echo "$l_item" | jq -r '.inviter')
+        L_TIME=$(echo "$l_item" | jq -r '.created_at')
+        echo "    - $L_REPO (From: $L_USER, At: $L_TIME)"
+    done
+    echo "  These invitations will NOT be accepted."
+    echo "--------------------------------------------------"
+fi
 
 PUBLIC_REPOS=$(echo "$ALL_INVITATIONS" | jq -c --argjson list "$USER_LIST_JSON" --arg kw "$REPO_KEYWORD" '
   .[] | select(
