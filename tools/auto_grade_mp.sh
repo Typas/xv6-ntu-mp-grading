@@ -13,7 +13,7 @@ USAGE="Usage: $0 --mp <mp_id> --students <students_json_file> [--wait-interval <
 MP_ID=""
 STUDENTS_FILE=""
 WAIT_INTERVAL=15
-MAX_ATTEMPTS=40
+MAX_ATTEMPTS=20
 NO_WAIT=false
 FORCE=false
 
@@ -76,7 +76,7 @@ OUTPUT_JSON="${GRADING_WORKSPACE}/${MP_ID}/result/final_grades.json"
 OUTPUT_CSV="${GRADING_WORKSPACE}/${MP_ID}/result/final_grades.csv"
 REPORTS_DIR="${GRADING_WORKSPACE}/${MP_ID}/result/reports"
 TMP_JSON=$(mktemp /tmp/grading_${MP_ID}_XXXXXX.json)
-trap "rm -f ${TMP_JSON}" EXIT
+trap "rm -f ${TMP_JSON} ${TMP_JSON%.json}.csv" EXIT
 echo ""
 echo "[Phase 2] Waiting for CI to finish and crawling scores..."
 
@@ -100,14 +100,23 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
         SUCCESS=true
         break
     else
-        echo "⏳ Some students' CI is still in progress. Waiting for ${WAIT_INTERVAL} seconds before retrying..."
+        # Check API rate limit before retrying
+        REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "0")
+        IFS=$'\t' read -r PENDING_COUNT NEEDED PENDING_NAMES <<< "$($PYTHON_RUN "${SDIR}/check_progress.py" "${TMP_JSON}" 2>/dev/null)"
+        if [ "$REMAINING" -lt "$NEEDED" ]; then
+            echo "⛔ API rate limit too low (${REMAINING} remaining, ~${NEEDED} needed). Stopping retries."
+            break
+        fi
+        echo "⏳ CIs of students ${PENDING_NAMES} still in progress. Waiting for ${WAIT_INTERVAL} seconds before retrying... (API: ${REMAINING} remaining)"
         sleep "$WAIT_INTERVAL"
     fi
     ((ATTEMPT++))
 done
 
 # Copy final results from tmp to persistent storage
+TMP_CSV="${TMP_JSON%.json}.csv"
 cp "${TMP_JSON}" "${OUTPUT_JSON}"
+cp "${TMP_CSV}" "${OUTPUT_CSV}" 2>/dev/null || true
 
 if [ "$SUCCESS" = false ]; then
     echo "⚠️ Warning: Maximum attempts reached ($MAX_ATTEMPTS). Some students' CI might have failed or timed out."
