@@ -8,32 +8,42 @@ else
 fi
 
 # --- Parameter Parsing ---
-USAGE="Usage: $0 --mp <mp_id> --students <students_json_file> [--wait-interval <seconds>] [--max-attempts <attempts>] [--init-wait <seconds>] [--no-wait] [--force]"
+USAGE="Usage: $0 --mp <mp_id> [--students <students_json_file> | --repo <owner/repo>] [--prefix <course_prefix>] [--wait-interval <seconds>] [--max-attempts <attempts>] [--init-wait <seconds>] [--poll] [--force]"
 
 MP_ID=""
 STUDENTS_FILE=""
+REPO=""
+PREFIX="ntuos2026"
 WAIT_INTERVAL=15
 MAX_ATTEMPTS=20
 INIT_WAIT=180
-NO_WAIT=false
+POLL=false
 FORCE=false
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --mp) MP_ID="$2"; shift ;;
         --students) STUDENTS_FILE="$2"; shift ;;
+        --repo) REPO="$2"; shift ;;
+        --prefix) PREFIX="$2"; shift ;;
         --wait-interval) WAIT_INTERVAL="$2"; shift ;;
         --max-attempts) MAX_ATTEMPTS="$2"; shift ;;
         --init-wait) INIT_WAIT="$2"; shift ;;
-        --no-wait) NO_WAIT=true ;;
+        --poll) POLL=true ;;
         --force) FORCE=true ;;
         *) echo "Unknown parameter passed: $1"; echo "$USAGE"; exit 1 ;;
     esac
     shift
 done
 
-if [[ -z "$MP_ID" || -z "$STUDENTS_FILE" ]]; then
-    echo "Error: --mp and --students arguments are required."
+if [[ -z "$MP_ID" ]]; then
+    echo "Error: --mp argument is required."
+    echo "$USAGE"
+    exit 1
+fi
+
+if [[ -z "$STUDENTS_FILE" && -z "$REPO" ]]; then
+    echo "Error: Either --students or --repo argument is required."
     echo "$USAGE"
     exit 1
 fi
@@ -56,17 +66,25 @@ if [[ "$FORCE" == true ]]; then
     FORCE_ARG="--force"
 fi
 
-$PYTHON_RUN "${SDIR}/trigger_grading.py" --mp "${MP_ID}" --students "${STUDENTS_FILE}" --grading-dir "${GRADING_WORKSPACE}" ${FORCE_ARG}
+TARGET_ARG=""
+if [[ -n "$STUDENTS_FILE" ]]; then
+    TARGET_ARG="--students ${STUDENTS_FILE}"
+elif [[ -n "$REPO" ]]; then
+    TARGET_ARG="--repo ${REPO}"
+fi
+
+$PYTHON_RUN "${SDIR}/trigger_grading.py" --mp "${MP_ID}" ${TARGET_ARG} --grading-dir "${GRADING_WORKSPACE}" ${FORCE_ARG} --branch "${PREFIX}/${MP_ID}"
 
 if [[ ! -f "$TARGETS_FILE" ]]; then
     echo "❌ Error: ${TARGETS_FILE} was not successfully generated. Aborting grading."
     exit 1
 fi
 
-if [[ "$NO_WAIT" == true ]]; then
+if [[ "$POLL" == false ]]; then
     echo "=================================================="
-    echo "✅ [Phase 1] Trigger complete! You have enabled --no-wait mode."
-    echo "All students' CI are now running in parallel in the background."
+    echo "✅ [Phase 1] Trigger complete! Running in background."
+    echo "⏳ All students' CI are now running in parallel in GitHub Actions."
+    echo "⚠️ This typically takes ~ 5 to 10 minutes to complete."
     echo "You can manually crawl the scores later at any time using the following command:"
     echo "  $PYTHON_RUN ${SDIR}/grading_crawler.py --targets ${TARGETS_FILE} --output final_grades_${MP_ID}.json --reports-dir reports_${MP_ID}"
     echo "=================================================="
@@ -78,7 +96,8 @@ OUTPUT_JSON="${GRADING_WORKSPACE}/${MP_ID}/result/final_grades.json"
 OUTPUT_CSV="${GRADING_WORKSPACE}/${MP_ID}/result/final_grades.csv"
 REPORTS_DIR="${GRADING_WORKSPACE}/${MP_ID}/result/reports"
 TMP_JSON=$(mktemp /tmp/grading_${MP_ID}_XXXXXX.json)
-trap "rm -f ${TMP_JSON} ${TMP_JSON%.json}.csv" EXIT
+# shellcheck disable=SC2064
+trap "rm -f '${TMP_JSON}' '${TMP_JSON%.json}.csv'" EXIT
 echo ""
 echo "[Phase 2] Waiting for CI to finish and crawling scores..."
 
@@ -118,7 +137,7 @@ while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
     else
         # Check API rate limit before retrying
         REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "0")
-        IFS=$'\t' read -r PENDING_COUNT NEEDED PENDING_NAMES <<< "$($PYTHON_RUN "${SDIR}/check_progress.py" "${TMP_JSON}" 2>/dev/null)"
+        IFS=$'\t' read -r _PENDING_COUNT NEEDED PENDING_NAMES <<< "$($PYTHON_RUN "${SDIR}/check_progress.py" "${TMP_JSON}" 2>/dev/null)"
         if [ "$REMAINING" -lt "$NEEDED" ]; then
             echo "⛔ API rate limit too low (${REMAINING} remaining, ~${NEEDED} needed). Stopping retries."
             break

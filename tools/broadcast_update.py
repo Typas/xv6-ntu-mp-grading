@@ -50,11 +50,8 @@ def process_repo(repo_url, target_branch, public_dir, mp_id, message, dry_run, w
             
         run_cmd(f"git clone {repo_url} {tmp_repo_dir}")
         
-        # Switch to assignment branch (ntuos2026/mpX)
-        try:
-            run_cmd(f"git checkout {target_branch}", cwd=tmp_repo_dir)
-        except RuntimeError:
-            return False, repo_url, f"Branch {target_branch} does not exist."
+        # Switch to assignment branch (prefix/mpX)
+        run_command(f"git checkout {target_branch}", cwd=tmp_repo_dir)
 
         # 2. Sync Files (Public assets only)
         changed = False
@@ -109,6 +106,7 @@ def main():
     
     parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--prefix", default="ntuos2026", help="Course prefix for branch")
     
     args = parser.parse_args()
 
@@ -136,7 +134,7 @@ def main():
         print("[*] MODE: DRY-RUN (Changes will be committed locally, but NOT pushed)")
     
     os.makedirs(BASE_TMP_DIR, exist_ok=True)
-    target_branch = f"ntuos2026/{args.mp}"
+    target_branch = f"{args.prefix}/{args.mp}"
     
     results = {"success": [], "failed": [], "skipped": []}
     
