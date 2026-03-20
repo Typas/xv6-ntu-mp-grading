@@ -16,6 +16,7 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --workers <num>    Number of parallel workers (default: 4, applies to --repos-list)"
+    echo "  --prefix <str>     Course prefix for branch (default: ntuos2026)"
     echo "  --dry-run          Preview changes locally without pushing"
     echo "  -h, --help         Show this help message"
     echo ""
@@ -28,6 +29,7 @@ MESSAGE=""
 TARGET_ARGS=""
 DRY_RUN=""
 WORKERS=""
+PREFIX=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -36,6 +38,7 @@ while [[ "$#" -gt 0 ]]; do
         --repo) TARGET_ARGS="--repo $2"; shift ;;
         --repos-list) TARGET_ARGS="--repos-list $2"; shift ;;
         --workers) WORKERS="--workers $2"; shift ;;
+        --prefix) PREFIX="--prefix $2"; shift ;;
         --dry-run) DRY_RUN="--dry-run" ;;
         -h|--help) usage ;;
         *) echo "Unknown parameter: $1"; usage ;;
@@ -54,4 +57,4 @@ fi
 
 PYTHON_SCRIPT="$(dirname "$0")/broadcast_update.py"
 
-python3 "$PYTHON_SCRIPT" --mp "$MP" --message "$MESSAGE" $TARGET_ARGS $WORKERS $DRY_RUN
+python3 "$PYTHON_SCRIPT" --mp "$MP" --message "$MESSAGE" $TARGET_ARGS $WORKERS $PREFIX $DRY_RUN
