@@ -132,7 +132,7 @@ cd xv6-ntu-mp-grading/tools
 ./auto_grade_mp.sh --mp mpX --students ../mpX/result/students_mpX.json
 ```
 
-*(提示：如果您不想等 CI 跑完，只想先將測資推送上去，可以附加 `--no-wait` 參數，引擎會在丟出 Payload 後直接離開，您可以晚點再下同一道沒有 --no-wait 參數的指令來純抓取成績。另外，如果同學的程式碼完全沒變更，且 Payload 也沒更新，系統預設會**跳過觸發 (避免浪費 CI 資源)**，直接去抓上一次的成績；若您想強制所有人重新跑一次 CI，請加上 `--force` 參數。)*
+*(提示：由於批改時 CI 執行通常需要耗時 5-10 分鐘，為了方便，引擎預設在丟出 Payload 觸發 CI 後就會直接返回 (Non-blocking)，讓背景伺服器自行運作，您可以稍後再下指令來純粹抓取成績。如果您想要停留在終端機等待並自動輪詢成績，請附加 `--poll` 參數。另外，如果同學的程式碼完全沒變更，且 Payload 也沒更新，系統預設會**跳過觸發 (避免浪費 CI 資源)**，直接去抓上一次的成績；若您想強制所有人重新跑一次 CI，請加上 `--force` 參數。)*
 
 **做什麼事？**
 這是一支將 `trigger_grading` 與 `grading_crawler` 無縫串接的平行化腳本：
@@ -177,7 +177,7 @@ anon-chihaya/ntuos2026-mpX,Success,100,https://github.com/anon-chihaya/ntuos2026
 身兼最高指揮官的 Bash 腳本，負責統籌整個自動評分生命週期。
 
 * **運作機制**：首先派發 `trigger_grading.py` 將測資覆蓋並點燃 CI。若未指定 `--no-wait`，接著會自動呼叫 `grading_crawler.py` 進入輪詢狀態，等待並彙整 `.csv` 與 `.json` 成績單。
-* **用法**：`./auto_grade_mp.sh --mp <mp_id> --students <roster_json> [--no-wait] [--force] [--max-attempts <int>] [--wait-interval <int>]`
+* **用法**：`./auto_grade_mp.sh --mp <mp_id> [--students <roster_json> | --repo <owner/repo>] [--prefix <course_prefix>] [--poll] [--force] [--max-attempts <int>] [--wait-interval <int>]`
 
 ### `trigger_grading.py`
 
