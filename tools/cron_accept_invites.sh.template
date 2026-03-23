@@ -1,0 +1,61 @@
+#!/bin/bash
+# ==========================================================
+# GitHub Invitation Automation Script (Generated Template)
+# Target MP: __MP_NAME__
+# Generated on: $(date)
+# ==========================================================
+
+# --- Path Configuration ---
+WORKING_DIR="__WORKING_DIR__"
+cd "$WORKING_DIR" || { echo "Error: Cannot cd to $WORKING_DIR"; exit 1; }
+
+# --- Time Window Check ---
+# Format: YYYY-MM-DD HH:MM:SS
+START_TIME="__START_TIME__"
+END_TIME="__END_TIME__"
+
+START_TS=$(date -d "$START_TIME" +%s)
+END_TS=$(date -d "$END_TIME" +%s)
+CURRENT_TS=$(date +%s)
+
+LOG_FILE="cron_accept_invites.log"
+
+if [[ "$CURRENT_TS" -lt "$START_TS" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SKIP: Execution window not started yet (Start: $START_TIME)" >> "$LOG_FILE"
+    exit 0
+fi
+
+if [[ "$CURRENT_TS" -gt "$END_TS" ]]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SKIP: Execution window closed (End: $END_TIME)" >> "$LOG_FILE"
+    exit 0
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] START: Processing invitations for __MP_NAME__" >> "$LOG_FILE"
+
+# --- Parameters ---
+SHEET_ID="__SHEET_ID__"
+SHEET_GID="__SHEET_GID__"
+MP_NAME="__MP_NAME__"
+OUTPUT_PATH="__OUTPUT_PATH__"
+
+# 1. Download the TSV, skip the header, select relevant columns, and format as CSV
+# Fields: Timestamp, Email, GitHub Username, ... (adjust cut -f if needed)
+# Based on user logic: cut -f3,4,5
+curl -s -L "https://docs.google.com/spreadsheets/d/$SHEET_ID/export?format=tsv&gid=$SHEET_GID" | \
+tr -d '\r' | tail -n +2 | cut -f3,4,5 | \
+awk -F'\t' '{for(i=1;i<=NF;i++) printf "\"%s\"%s", $i, (i==NF?ORS:",")}' > student-github-accounts.csv
+
+# 2. Extract GitHub Username and save to whitelist.txt
+# Logic: use the CSV generated above, extract GitHub Username (assumed 3rd field in student-github-accounts.csv)
+awk -F'","' '{print $3}' student-github-accounts.csv | sed 's/"//g' > ../whitelist.txt
+
+# 3. Run accept_invite.sh
+if [[ -f "./accept_invite.sh" ]]; then
+    ./accept_invite.sh -f ../whitelist.txt -r "$MP_NAME" -o "$OUTPUT_PATH" >> "$LOG_FILE" 2>&1
+else
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: accept_invite.sh not found in $WORKING_DIR" >> "$LOG_FILE"
+    exit 1
+fi
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] FINISH: Task completed" >> "$LOG_FILE"
+echo "--------------------------------------------------" >> "$LOG_FILE"
